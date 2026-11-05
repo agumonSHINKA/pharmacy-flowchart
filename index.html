@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>社區藥局流程圖編輯器</title>
+<!-- 字型可選：離線時自動改用電腦內建 Noto Sans CJK TC／PingFang／微軟正黑體 -->
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--paper:#f5f5f5;--ink:#2d3142;--muted:#4f5d75;--soft:#5a6580;--accent:#bf4520;
+--sans:'Geist','Noto Sans TC','Noto Sans CJK TC','PingFang TC','Microsoft JhengHei',system-ui,sans-serif;
+--serif:'Instrument Serif','Noto Serif TC','Noto Serif CJK TC',serif;--mono:'Geist Mono',ui-monospace,monospace}
+html,body{height:100%}
+body{font-family:var(--sans);background:var(--paper);color:var(--ink);display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;padding:10px 16px;border-bottom:1px solid rgba(45,49,66,.15);background:#fafafa}
+header .brand{font:500 11px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-right:8px}
+header .sep{width:1px;height:22px;background:rgba(45,49,66,.18);margin:0 4px}
+button,.btn{font:500 13px var(--sans);color:var(--ink);background:#fff;border:1px solid rgba(45,49,66,.55);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+button:hover,.btn:hover{border-color:var(--accent);color:var(--accent)}
+button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+button:disabled{opacity:.4;cursor:default;border-color:rgba(45,49,66,.3);color:var(--ink)}
+.edit-only{display:none}
+body.editing .edit-only{display:inline-flex}
+body.editing .view-only{display:none}
+#status{font-size:12px;color:var(--soft);margin-left:auto}
+main{flex:1;display:flex;min-height:0}
+#canvasWrap{flex:1;overflow:auto;position:relative}
+#svg{display:block;width:1480px;min-width:1480px;height:auto;margin:12px auto;user-select:none;-webkit-user-select:none}
+#panel{width:300px;border-left:1px solid rgba(45,49,66,.15);background:#fafafa;padding:14px;overflow:auto;display:none;font-size:13px}
+body.editing #panel{display:block}
+#panel h3{font:600 14px var(--sans);margin-bottom:8px}
+#panel .help{color:var(--soft);font-size:12px;line-height:1.6}
+#panel label{display:block;margin:10px 0 4px;color:var(--muted);font-size:12px;font-weight:500}
+#panel input[type=text],#panel textarea,#panel select,#panel input[type=number]{width:100%;font:13px var(--sans);padding:5px 7px;border:1px solid rgba(45,49,66,.35);border-radius:4px;background:#fff;color:var(--ink)}
+#panel textarea{min-height:52px;resize:vertical}
+#panel .row{display:flex;gap:6px}
+#panel .row>*{flex:1}
+#panel .chk{display:flex;align-items:center;gap:6px;margin-top:10px;color:var(--ink);font-size:13px}
+#panel .actions{margin-top:14px;display:flex;gap:6px;flex-wrap:wrap}
+#panel .danger{border-color:#a33;color:#a33}
+.zone,.tri{cursor:pointer;outline:none}
+.zone .zframe{transition:height .35s ease}
+.zone:hover .zhit{fill:rgba(191,69,32,.06)}
+.tri:hover polygon{stroke:var(--accent);stroke-width:1.6}
+.fade{transition:opacity .3s ease}
+.hidden{opacity:0;pointer-events:none}
+body.editing .node{cursor:move}
+.node.sel>.shape{stroke:#2e5aa8 !important;stroke-width:2.4 !important}
+.edge.sel>path.vis{stroke:#2e5aa8 !important;stroke-width:2.2 !important}
+.edge .hit{stroke:transparent;stroke-width:12;fill:none}
+body.editing .edge .hit{cursor:pointer}
+.handle{cursor:crosshair}
+body.connecting #svg{cursor:crosshair}
+#inline{position:absolute;display:none;z-index:5;background:#fff;border:1px solid #2e5aa8;border-radius:6px;padding:6px;box-shadow:none;gap:4px;flex-direction:column}
+#inline input,#inline textarea{font:13px var(--sans);padding:4px 6px;border:1px solid rgba(45,49,66,.35);border-radius:4px;width:100%}
+#inline .hint{font-size:11px;color:var(--soft)}
+@media (prefers-reduced-motion:reduce){.zone .zframe,.fade{transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">Flowchart Editor · 社區藥局</span>
+  <button id="modeBtn">切換到編輯模式 (Edit)</button>
+  <span class="sep"></span>
+  <button id="expandAll" class="view-only">全部展開 (Expand all)</button>
+  <button id="collapseAll" class="view-only">全部收合 (Collapse all)</button>
+  <button id="addBtn" class="edit-only">＋ 新增節點 (Add)</button>
+  <button id="connectBtn" class="edit-only">連線 (Connect)</button>
+  <button id="delBtn" class="edit-only">刪除 (Delete)</button>
+  <button id="undoBtn" class="edit-only" title="Ctrl+Z">復原 (Undo)</button>
+  <button id="redoBtn" class="edit-only" title="Ctrl+Y">重做 (Redo)</button>
+  <span class="sep"></span>
+  <button id="exportJsonBtn">匯出 JSON</button>
+  <button id="importJsonBtn">匯入 JSON</button>
+  <input type="file" id="fileIn" accept=".json,application/json" hidden>
+  <button id="htmlBtn">下載 HTML</button>
+  <button id="svgBtn">匯出 SVG</button>
+  <button id="pngBtn">匯出 PNG</button>
+  <button id="resetBtn">還原原始 (Reset)</button>
+  <span id="status"></span>
+</header>
+<main>
+  <div id="canvasWrap"><svg id="svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 1292"></svg><div id="inline"></div></div>
+  <aside id="panel" aria-label="屬性面板"></aside>
+</main>
+<script type="application/json" id="original-data">{"version": 1, "title": "社區藥局完整運作流程", "subtitle": "前台：處方調劑・慢箋續領・OTC 諮詢　｜　後台：庫存・管制藥品・健保申報", "viewBox": [1480, 1292], "offsetY": 72, "sections": [{"id": "A", "title": "處方調劑（一般處方・慢箋首次）", "x": 32, "y": 208, "w": 560, "h": 928, "tx": 212, "hint": true, "collapsed": true}, {"id": "B", "title": "慢箋續領", "x": 608, "y": 208, "w": 280, "h": 292, "tx": 624, "hint": false, "collapsed": true}, {"id": "C", "title": "OTC／保健品諮詢", "x": 904, "y": 208, "w": 544, "h": 448, "tx": 1076, "hint": true, "collapsed": true}, {"id": "D", "title": "後台作業", "x": 608, "y": 676, "w": 840, "h": 460, "tx": 624, "hint": true, "collapsed": true}], "nodes": [{"id": "n1", "type": "startend", "label": "顧客進門", "sublabel": "", "section": "T", "safety": false, "x": 668, "y": 24, "w": 160, "h": 44}, {"id": "n2", "type": "decision", "label": "來店需求？", "sublabel": "", "section": "T", "safety": false, "x": 652, "y": 92, "w": 192, "h": 88, "role": "triage"}, {"id": "n3", "type": "process", "label": "收方・確認處方箋", "sublabel": "效期・院所章・醫師簽章", "section": "A", "safety": false, "x": 72, "y": 240, "w": 248, "h": 52}, {"id": "n4", "type": "process", "label": "健保卡讀卡・登錄", "sublabel": "身分確認・部分負擔", "section": "A", "safety": false, "x": 72, "y": 324, "w": 248, "h": 52}, {"id": "n5", "type": "process", "label": "處方審核・適當性評估", "sublabel": "劑量・交互作用・重複用藥・過敏", "section": "A", "safety": false, "x": 72, "y": 408, "w": 248, "h": 52}, {"id": "n6", "type": "decision", "label": "處方有疑義？", "sublabel": "", "section": "A", "safety": true, "x": 92, "y": 492, "w": 208, "h": 88}, {"id": "n7", "type": "process", "label": "照會處方醫師", "sublabel": "", "section": "A", "safety": false, "x": 368, "y": 512, "w": 200, "h": 48}, {"id": "n8", "type": "decision", "label": "庫存足夠？", "sublabel": "", "section": "A", "safety": false, "x": 92, "y": 620, "w": 208, "h": 88}, {"id": "n9", "type": "process", "label": "調貨・欠藥登記", "sublabel": "", "section": "A", "safety": false, "x": 368, "y": 640, "w": 200, "h": 48}, {"id": "n10", "type": "process", "label": "調劑", "sublabel": "撿藥・分包・藥袋標示", "section": "A", "safety": false, "x": 72, "y": 744, "w": 248, "h": 52}, {"id": "n11", "type": "process", "label": "覆核", "sublabel": "藥師核對・三讀五對", "section": "A", "safety": false, "x": 72, "y": 828, "w": 248, "h": 52}, {"id": "n12", "type": "process", "label": "交付・用藥指導", "sublabel": "核對身分・用法・副作用・保存", "section": "A", "safety": false, "x": 72, "y": 912, "w": 248, "h": 52}, {"id": "n13", "type": "process", "label": "藥歷建檔・資料上傳", "sublabel": "調劑紀錄・健保 IC 卡上傳", "section": "A", "safety": false, "x": 72, "y": 996, "w": 248, "h": 52}, {"id": "n14", "type": "startend", "label": "完成調劑", "sublabel": "", "section": "A", "safety": false, "x": 116, "y": 1080, "w": 160, "h": 40}, {"id": "n15", "type": "process", "label": "核對慢性病連續處方箋", "sublabel": "領藥次數・處方效期", "section": "B", "safety": false, "x": 632, "y": 240, "w": 232, "h": 52}, {"id": "n16", "type": "decision", "label": "在可領藥期間？", "sublabel": "", "section": "B", "safety": false, "x": 648, "y": 306, "w": 200, "h": 88}, {"id": "n17", "type": "startend", "label": "告知可領日期", "sublabel": "用藥期滿前 10 日內", "section": "B", "safety": false, "x": 648, "y": 432, "w": 200, "h": 48}, {"id": "n18", "type": "process", "label": "評估症狀・用藥史", "sublabel": "孕哺・兒童・長者・慢性病", "section": "C", "safety": false, "x": 944, "y": 240, "w": 232, "h": 52}, {"id": "n19", "type": "decision", "label": "需轉介就醫？", "sublabel": "", "section": "C", "safety": true, "x": 956, "y": 306, "w": 208, "h": 88}, {"id": "n20", "type": "startend", "label": "建議就醫・轉介", "sublabel": "警訊症狀・勿延誤", "section": "C", "safety": false, "x": 1244, "y": 326, "w": 184, "h": 48}, {"id": "n21", "type": "process", "label": "選藥建議・用藥衛教", "sublabel": "OTC・指示藥・保健品", "section": "C", "safety": false, "x": 944, "y": 432, "w": 232, "h": 52}, {"id": "n22", "type": "process", "label": "結帳・購藥紀錄", "sublabel": "必要時建立藥歷", "section": "C", "safety": false, "x": 944, "y": 516, "w": 232, "h": 52}, {"id": "n23", "type": "startend", "label": "完成銷售", "sublabel": "", "section": "C", "safety": false, "x": 980, "y": 600, "w": 160, "h": 40}, {"id": "n24", "type": "process", "label": "統一採購・叫貨", "sublabel": "藥品／OTC／保健食品", "section": "D", "safety": false, "x": 632, "y": 720, "w": 168, "h": 52}, {"id": "n25", "type": "process", "label": "進貨驗收", "sublabel": "批號・效期・數量・溫度", "section": "D", "safety": false, "x": 840, "y": 720, "w": 168, "h": 52}, {"id": "n26", "type": "process", "label": "上架・儲存", "sublabel": "先到期先出・冷藏 2–8°C", "section": "D", "safety": false, "x": 1048, "y": 720, "w": 168, "h": 52}, {"id": "n27", "type": "process", "label": "盤點・效期檢查", "sublabel": "定期盤點・近效期標示", "section": "D", "safety": false, "x": 1256, "y": 720, "w": 168, "h": 52}, {"id": "n28", "type": "decision", "label": "近效期／瑕疵？", "sublabel": "", "section": "D", "safety": false, "x": 1256, "y": 808, "w": 168, "h": 80}, {"id": "n29", "type": "process", "label": "退貨・報廢", "sublabel": "報廢紀錄・依規銷毀", "section": "D", "safety": false, "x": 1256, "y": 924, "w": 168, "h": 52}, {"id": "n30", "type": "process", "label": "管制藥品管理", "sublabel": "專櫃加鎖・專人保管\n收支結存簿冊・定期申報", "section": "D", "safety": false, "x": 824, "y": 820, "w": 200, "h": 68}, {"id": "n31", "type": "process", "label": "健保費用申報", "sublabel": "次月 20 日前申報上月", "section": "D", "safety": false, "x": 632, "y": 996, "w": 208, "h": 52}, {"id": "n32", "type": "process", "label": "健保署審查・核付", "sublabel": "遭核減時提出申復", "section": "D", "safety": false, "x": 880, "y": 996, "w": 208, "h": 52}], "edges": [{"id": "e1", "fromSide": "bottom", "to": "n2", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n1"}, {"id": "e2", "fromSide": "left", "to": "n3", "toSide": "top", "label": "處方箋", "dashed": false, "accent": false, "labelT": 0.5, "from": "n2"}, {"id": "e3", "fromSide": "bottom", "to": "n15", "toSide": "top", "label": "慢箋第 2／3 次", "dashed": false, "accent": false, "labelT": 0.233, "from": "n2"}, {"id": "e4", "fromSide": "right", "to": "n18", "toSide": "top", "label": "自購・諮詢", "dashed": false, "accent": false, "labelT": 0.5, "from": "n2"}, {"id": "e5", "fromSide": "bottom", "to": "n4", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n3"}, {"id": "e6", "fromSide": "bottom", "to": "n5", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n4"}, {"id": "e7", "fromSide": "bottom", "to": "n6", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n5"}, {"id": "e8", "fromSide": "right", "to": "n7", "toSide": "left", "label": "是", "dashed": false, "accent": true, "labelT": 0.5, "from": "n6"}, {"id": "e9", "fromSide": "top", "to": "n5", "toSide": "right", "label": "修正後重審", "dashed": true, "accent": false, "labelT": 0.462, "from": "n7"}, {"id": "e10", "fromSide": "bottom", "to": "n8", "toSide": "top", "label": "否", "dashed": false, "accent": false, "labelT": 0.5, "from": "n6"}, {"id": "e11", "fromSide": "right", "to": "n9", "toSide": "left", "label": "否", "dashed": false, "accent": false, "labelT": 0.5, "from": "n8"}, {"id": "e12", "fromSide": "bottom", "to": "n10", "toSide": "right", "label": "到貨後調劑", "dashed": true, "accent": false, "labelT": 0.341, "from": "n9"}, {"id": "e13", "fromSide": "bottom", "to": "n10", "toSide": "top", "label": "是", "dashed": false, "accent": false, "labelT": 0.5, "from": "n8"}, {"id": "e14", "fromSide": "bottom", "to": "n11", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n10"}, {"id": "e15", "fromSide": "bottom", "to": "n12", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n11"}, {"id": "e16", "fromSide": "bottom", "to": "n13", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n12"}, {"id": "e17", "fromSide": "bottom", "to": "n14", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n13"}, {"id": "e18", "fromSide": "right", "to": "n31", "toSide": "left", "label": "調劑資料", "dashed": true, "accent": false, "labelT": 0.5, "from": "n13"}, {"id": "e19", "fromSide": "bottom", "to": "n16", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n15"}, {"id": "e20", "fromSide": "left", "to": "n4", "toSide": "right", "label": "是・併入讀卡", "dashed": false, "accent": false, "labelT": 0.5, "from": "n16"}, {"id": "e21", "fromSide": "bottom", "to": "n17", "toSide": "top", "label": "否", "dashed": false, "accent": false, "labelT": 0.474, "from": "n16"}, {"id": "e22", "fromSide": "bottom", "to": "n19", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n18"}, {"id": "e23", "fromSide": "right", "to": "n20", "toSide": "left", "label": "是", "dashed": false, "accent": true, "labelT": 0.5, "from": "n19"}, {"id": "e24", "fromSide": "bottom", "to": "n21", "toSide": "top", "label": "否", "dashed": false, "accent": false, "labelT": 0.474, "from": "n19"}, {"id": "e25", "fromSide": "bottom", "to": "n22", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n21"}, {"id": "e26", "fromSide": "bottom", "to": "n23", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n22"}, {"id": "e27", "fromSide": "right", "to": "n25", "toSide": "left", "label": "", "dashed": false, "accent": false, "from": "n24"}, {"id": "e28", "fromSide": "right", "to": "n26", "toSide": "left", "label": "", "dashed": false, "accent": false, "from": "n25"}, {"id": "e29", "fromSide": "right", "to": "n27", "toSide": "left", "label": "", "dashed": false, "accent": false, "from": "n26"}, {"id": "e30", "fromSide": "bottom", "to": "n28", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n27"}, {"id": "e31", "fromSide": "bottom", "to": "n29", "toSide": "top", "label": "是", "dashed": false, "accent": false, "labelT": 0.5, "from": "n28"}, {"id": "e32", "fromSide": "left", "to": "n26", "toSide": "bottom", "label": "否・續售", "dashed": false, "accent": false, "labelT": 0.484, "from": "n28"}, {"id": "e33", "fromSide": "bottom", "to": "n30", "toSide": "top", "label": "管制藥品", "dashed": true, "accent": false, "labelT": 0.5, "from": "n25"}, {"id": "e34", "fromSide": "right", "to": "n32", "toSide": "left", "label": "", "dashed": false, "accent": false, "from": "n31"}]}</script>
+<script type="application/json" id="seed-data">{"seedId": "orig-v1", "data": {"version": 1, "title": "社區藥局完整運作流程", "subtitle": "前台：處方調劑・慢箋續領・OTC 諮詢　｜　後台：庫存・管制藥品・健保申報", "viewBox": [1480, 1292], "offsetY": 72, "sections": [{"id": "A", "title": "處方調劑（一般處方・慢箋首次）", "x": 32, "y": 208, "w": 560, "h": 928, "tx": 212, "hint": true, "collapsed": true}, {"id": "B", "title": "慢箋續領", "x": 608, "y": 208, "w": 280, "h": 292, "tx": 624, "hint": false, "collapsed": true}, {"id": "C", "title": "OTC／保健品諮詢", "x": 904, "y": 208, "w": 544, "h": 448, "tx": 1076, "hint": true, "collapsed": true}, {"id": "D", "title": "後台作業", "x": 608, "y": 676, "w": 840, "h": 460, "tx": 624, "hint": true, "collapsed": true}], "nodes": [{"id": "n1", "type": "startend", "label": "顧客進門", "sublabel": "", "section": "T", "safety": false, "x": 668, "y": 24, "w": 160, "h": 44}, {"id": "n2", "type": "decision", "label": "來店需求？", "sublabel": "", "section": "T", "safety": false, "x": 652, "y": 92, "w": 192, "h": 88, "role": "triage"}, {"id": "n3", "type": "process", "label": "收方・確認處方箋", "sublabel": "效期・院所章・醫師簽章", "section": "A", "safety": false, "x": 72, "y": 240, "w": 248, "h": 52}, {"id": "n4", "type": "process", "label": "健保卡讀卡・登錄", "sublabel": "身分確認・部分負擔", "section": "A", "safety": false, "x": 72, "y": 324, "w": 248, "h": 52}, {"id": "n5", "type": "process", "label": "處方審核・適當性評估", "sublabel": "劑量・交互作用・重複用藥・過敏", "section": "A", "safety": false, "x": 72, "y": 408, "w": 248, "h": 52}, {"id": "n6", "type": "decision", "label": "處方有疑義？", "sublabel": "", "section": "A", "safety": true, "x": 92, "y": 492, "w": 208, "h": 88}, {"id": "n7", "type": "process", "label": "照會處方醫師", "sublabel": "", "section": "A", "safety": false, "x": 368, "y": 512, "w": 200, "h": 48}, {"id": "n8", "type": "decision", "label": "庫存足夠？", "sublabel": "", "section": "A", "safety": false, "x": 92, "y": 620, "w": 208, "h": 88}, {"id": "n9", "type": "process", "label": "調貨・欠藥登記", "sublabel": "", "section": "A", "safety": false, "x": 368, "y": 640, "w": 200, "h": 48}, {"id": "n10", "type": "process", "label": "調劑", "sublabel": "撿藥・分包・藥袋標示", "section": "A", "safety": false, "x": 72, "y": 744, "w": 248, "h": 52}, {"id": "n11", "type": "process", "label": "覆核", "sublabel": "藥師核對・三讀五對", "section": "A", "safety": false, "x": 72, "y": 828, "w": 248, "h": 52}, {"id": "n12", "type": "process", "label": "交付・用藥指導", "sublabel": "核對身分・用法・副作用・保存", "section": "A", "safety": false, "x": 72, "y": 912, "w": 248, "h": 52}, {"id": "n13", "type": "process", "label": "藥歷建檔・資料上傳", "sublabel": "調劑紀錄・健保 IC 卡上傳", "section": "A", "safety": false, "x": 72, "y": 996, "w": 248, "h": 52}, {"id": "n14", "type": "startend", "label": "完成調劑", "sublabel": "", "section": "A", "safety": false, "x": 116, "y": 1080, "w": 160, "h": 40}, {"id": "n15", "type": "process", "label": "核對慢性病連續處方箋", "sublabel": "領藥次數・處方效期", "section": "B", "safety": false, "x": 632, "y": 240, "w": 232, "h": 52}, {"id": "n16", "type": "decision", "label": "在可領藥期間？", "sublabel": "", "section": "B", "safety": false, "x": 648, "y": 306, "w": 200, "h": 88}, {"id": "n17", "type": "startend", "label": "告知可領日期", "sublabel": "用藥期滿前 10 日內", "section": "B", "safety": false, "x": 648, "y": 432, "w": 200, "h": 48}, {"id": "n18", "type": "process", "label": "評估症狀・用藥史", "sublabel": "孕哺・兒童・長者・慢性病", "section": "C", "safety": false, "x": 944, "y": 240, "w": 232, "h": 52}, {"id": "n19", "type": "decision", "label": "需轉介就醫？", "sublabel": "", "section": "C", "safety": true, "x": 956, "y": 306, "w": 208, "h": 88}, {"id": "n20", "type": "startend", "label": "建議就醫・轉介", "sublabel": "警訊症狀・勿延誤", "section": "C", "safety": false, "x": 1244, "y": 326, "w": 184, "h": 48}, {"id": "n21", "type": "process", "label": "選藥建議・用藥衛教", "sublabel": "OTC・指示藥・保健品", "section": "C", "safety": false, "x": 944, "y": 432, "w": 232, "h": 52}, {"id": "n22", "type": "process", "label": "結帳・購藥紀錄", "sublabel": "必要時建立藥歷", "section": "C", "safety": false, "x": 944, "y": 516, "w": 232, "h": 52}, {"id": "n23", "type": "startend", "label": "完成銷售", "sublabel": "", "section": "C", "safety": false, "x": 980, "y": 600, "w": 160, "h": 40}, {"id": "n24", "type": "process", "label": "統一採購・叫貨", "sublabel": "藥品／OTC／保健食品", "section": "D", "safety": false, "x": 632, "y": 720, "w": 168, "h": 52}, {"id": "n25", "type": "process", "label": "進貨驗收", "sublabel": "批號・效期・數量・溫度", "section": "D", "safety": false, "x": 840, "y": 720, "w": 168, "h": 52}, {"id": "n26", "type": "process", "label": "上架・儲存", "sublabel": "先到期先出・冷藏 2–8°C", "section": "D", "safety": false, "x": 1048, "y": 720, "w": 168, "h": 52}, {"id": "n27", "type": "process", "label": "盤點・效期檢查", "sublabel": "定期盤點・近效期標示", "section": "D", "safety": false, "x": 1256, "y": 720, "w": 168, "h": 52}, {"id": "n28", "type": "decision", "label": "近效期／瑕疵？", "sublabel": "", "section": "D", "safety": false, "x": 1256, "y": 808, "w": 168, "h": 80}, {"id": "n29", "type": "process", "label": "退貨・報廢", "sublabel": "報廢紀錄・依規銷毀", "section": "D", "safety": false, "x": 1256, "y": 924, "w": 168, "h": 52}, {"id": "n30", "type": "process", "label": "管制藥品管理", "sublabel": "專櫃加鎖・專人保管\n收支結存簿冊・定期申報", "section": "D", "safety": false, "x": 824, "y": 820, "w": 200, "h": 68}, {"id": "n31", "type": "process", "label": "健保費用申報", "sublabel": "次月 20 日前申報上月", "section": "D", "safety": false, "x": 632, "y": 996, "w": 208, "h": 52}, {"id": "n32", "type": "process", "label": "健保署審查・核付", "sublabel": "遭核減時提出申復", "section": "D", "safety": false, "x": 880, "y": 996, "w": 208, "h": 52}], "edges": [{"id": "e1", "fromSide": "bottom", "to": "n2", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n1"}, {"id": "e2", "fromSide": "left", "to": "n3", "toSide": "top", "label": "處方箋", "dashed": false, "accent": false, "labelT": 0.5, "from": "n2"}, {"id": "e3", "fromSide": "bottom", "to": "n15", "toSide": "top", "label": "慢箋第 2／3 次", "dashed": false, "accent": false, "labelT": 0.233, "from": "n2"}, {"id": "e4", "fromSide": "right", "to": "n18", "toSide": "top", "label": "自購・諮詢", "dashed": false, "accent": false, "labelT": 0.5, "from": "n2"}, {"id": "e5", "fromSide": "bottom", "to": "n4", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n3"}, {"id": "e6", "fromSide": "bottom", "to": "n5", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n4"}, {"id": "e7", "fromSide": "bottom", "to": "n6", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n5"}, {"id": "e8", "fromSide": "right", "to": "n7", "toSide": "left", "label": "是", "dashed": false, "accent": true, "labelT": 0.5, "from": "n6"}, {"id": "e9", "fromSide": "top", "to": "n5", "toSide": "right", "label": "修正後重審", "dashed": true, "accent": false, "labelT": 0.462, "from": "n7"}, {"id": "e10", "fromSide": "bottom", "to": "n8", "toSide": "top", "label": "否", "dashed": false, "accent": false, "labelT": 0.5, "from": "n6"}, {"id": "e11", "fromSide": "right", "to": "n9", "toSide": "left", "label": "否", "dashed": false, "accent": false, "labelT": 0.5, "from": "n8"}, {"id": "e12", "fromSide": "bottom", "to": "n10", "toSide": "right", "label": "到貨後調劑", "dashed": true, "accent": false, "labelT": 0.341, "from": "n9"}, {"id": "e13", "fromSide": "bottom", "to": "n10", "toSide": "top", "label": "是", "dashed": false, "accent": false, "labelT": 0.5, "from": "n8"}, {"id": "e14", "fromSide": "bottom", "to": "n11", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n10"}, {"id": "e15", "fromSide": "bottom", "to": "n12", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n11"}, {"id": "e16", "fromSide": "bottom", "to": "n13", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n12"}, {"id": "e17", "fromSide": "bottom", "to": "n14", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n13"}, {"id": "e18", "fromSide": "right", "to": "n31", "toSide": "left", "label": "調劑資料", "dashed": true, "accent": false, "labelT": 0.5, "from": "n13"}, {"id": "e19", "fromSide": "bottom", "to": "n16", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n15"}, {"id": "e20", "fromSide": "left", "to": "n4", "toSide": "right", "label": "是・併入讀卡", "dashed": false, "accent": false, "labelT": 0.5, "from": "n16"}, {"id": "e21", "fromSide": "bottom", "to": "n17", "toSide": "top", "label": "否", "dashed": false, "accent": false, "labelT": 0.474, "from": "n16"}, {"id": "e22", "fromSide": "bottom", "to": "n19", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n18"}, {"id": "e23", "fromSide": "right", "to": "n20", "toSide": "left", "label": "是", "dashed": false, "accent": true, "labelT": 0.5, "from": "n19"}, {"id": "e24", "fromSide": "bottom", "to": "n21", "toSide": "top", "label": "否", "dashed": false, "accent": false, "labelT": 0.474, "from": "n19"}, {"id": "e25", "fromSide": "bottom", "to": "n22", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n21"}, {"id": "e26", "fromSide": "bottom", "to": "n23", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n22"}, {"id": "e27", "fromSide": "right", "to": "n25", "toSide": "left", "label": "", "dashed": false, "accent": false, "from": "n24"}, {"id": "e28", "fromSide": "right", "to": "n26", "toSide": "left", "label": "", "dashed": false, "accent": false, "from": "n25"}, {"id": "e29", "fromSide": "right", "to": "n27", "toSide": "left", "label": "", "dashed": false, "accent": false, "from": "n26"}, {"id": "e30", "fromSide": "bottom", "to": "n28", "toSide": "top", "label": "", "dashed": false, "accent": false, "from": "n27"}, {"id": "e31", "fromSide": "bottom", "to": "n29", "toSide": "top", "label": "是", "dashed": false, "accent": false, "labelT": 0.5, "from": "n28"}, {"id": "e32", "fromSide": "left", "to": "n26", "toSide": "bottom", "label": "否・續售", "dashed": false, "accent": false, "labelT": 0.484, "from": "n28"}, {"id": "e33", "fromSide": "bottom", "to": "n30", "toSide": "top", "label": "管制藥品", "dashed": true, "accent": false, "labelT": 0.5, "from": "n25"}, {"id": "e34", "fromSide": "right", "to": "n32", "toSide": "left", "label": "", "dashed": false, "accent": false, "from": "n31"}]}}</script>
+<script>
+(function(){
+'use strict';
+var NS='http://www.w3.org/2000/svg';
+var C={paper:'#f5f5f5',ink:'#2d3142',muted:'#4f5d75',soft:'#5a6580',acc:'#bf4520',accT:'rgba(191,69,32,0.08)'};
+var SANS="'Geist', 'Noto Sans TC', 'Noto Sans CJK TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+var SERIF="'Instrument Serif', 'Noto Serif TC', 'Noto Serif CJK TC', serif";
+var MONO="'Geist Mono', ui-monospace, monospace";
+var KEY='pharmacy-flowchart-editor-v1';
+function $(id){return document.getElementById(id);}
+var ORIGINAL=JSON.parse($('original-data').textContent);
+var SEED=JSON.parse($('seed-data').textContent);
+var data, undoStack=[], redoStack=[];
+var open={A:false,B:false,C:false,D:false};
+var editing=false, sel=null, connectFrom=null, dirtyMsg='';
+var svg=$('svg');
+var lastDown={id:null,t:0};
+function isDbl(id){var now=Date.now(); var d=(lastDown.id===id&&now-lastDown.t<450); lastDown={id:d?null:id,t:now}; return d;}
+
+function clone(o){return JSON.parse(JSON.stringify(o));}
+function load(){
+  try{var s=JSON.parse(localStorage.getItem(KEY)||'null');
+    if(s&&s.seedId===SEED.seedId&&s.data&&s.data.nodes){data=s.data;status('已從瀏覽器自動儲存還原 (restored)');return;}}catch(e){}
+  data=clone(SEED.data);
+}
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify({seedId:SEED.seedId,savedAt:Date.now(),data:data}));status('已自動儲存 (autosaved) '+new Date().toLocaleTimeString());}
+  catch(e){status('自動儲存失敗：'+e.message);}
+}
+function status(t){$('status').textContent=t;}
+function commit(before){ if(before!==undefined){undoStack.push(before); if(undoStack.length>100)undoStack.shift(); redoStack=[];} save(); render(); updButtons();}
+function snap(){return JSON.stringify(data);}
+function undo(){ if(!undoStack.length)return; redoStack.push(snap()); data=JSON.parse(undoStack.pop()); sel=null; save(); render(); updButtons(); }
+function redo(){ if(!redoStack.length)return; undoStack.push(snap()); data=JSON.parse(redoStack.pop()); sel=null; save(); render(); updButtons(); }
+function updButtons(){ $('undoBtn').disabled=!undoStack.length; $('redoBtn').disabled=!redoStack.length; }
+
+function el(tag,attrs,parent){var e=document.createElementNS(NS,tag); for(var k in attrs) if(attrs[k]!==undefined&&attrs[k]!==null) e.setAttribute(k,attrs[k]); if(parent)parent.appendChild(e); return e;}
+function txt(parent,x,y,s,attrs){var a=Object.assign({x:x,y:y},attrs||{}); var t=el('text',a,parent); t.textContent=s; return t;}
+function nodeById(id){for(var i=0;i<data.nodes.length;i++) if(data.nodes[i].id===id) return data.nodes[i]; return null;}
+function secById(id){for(var i=0;i<data.sections.length;i++) if(data.sections[i].id===id) return data.sections[i]; return null;}
+function textW(s){var w=0; for(var i=0;i<s.length;i++){var c=s.charCodeAt(i); w+= (c>0x2e80)?12:7;} return w;}
+
+function isOpen(sec){ return editing || sec==='T' || !!open[sec]; }
+function sidePt(n,side){
+  var cx=n.x+n.w/2, cy=n.y+n.h/2;
+  return side==='top'?[cx,n.y]:side==='bottom'?[cx,n.y+n.h]:side==='left'?[n.x,cy]:[n.x+n.w,cy];
+}
+function route(e){
+  var a=nodeById(e.from), b=nodeById(e.to); if(!a||!b) return null;
+  var p0=sidePt(a,e.fromSide), p1=sidePt(b,e.toSide);
+  var fv=(e.fromSide==='top'||e.fromSide==='bottom'), tv=(e.toSide==='top'||e.toSide==='bottom');
+  var pts=[p0];
+  if(fv&&tv){ if(p0[0]!==p1[0]){var my=Math.round((p0[1]+p1[1])/2); pts.push([p0[0],my],[p1[0],my]);} }
+  else if(!fv&&!tv){ if(p0[1]!==p1[1]){var mx=Math.round((p0[0]+p1[0])/2); pts.push([mx,p0[1]],[mx,p1[1]]);} }
+  else if(fv&&!tv){ if(p0[0]!==p1[0]&&p0[1]!==p1[1]) pts.push([p0[0],p1[1]]); }
+  else { if(p0[0]!==p1[0]&&p0[1]!==p1[1]) pts.push([p1[0],p0[1]]); }
+  pts.push(p1); return pts;
+}
+function rpath(pts){
+  var d='M'+pts[0][0]+','+pts[0][1];
+  for(var i=1;i<pts.length-1;i++){
+    var p=pts[i-1],q=pts[i],n=pts[i+1];
+    var l1=Math.abs(q[0]-p[0])+Math.abs(q[1]-p[1]), l2=Math.abs(n[0]-q[0])+Math.abs(n[1]-q[1]);
+    var r=Math.min(8,l1/2,l2/2);
+    var ax=q[0]-Math.sign(q[0]-p[0])*r, ay=q[1]-Math.sign(q[1]-p[1])*r;
+    var bx=q[0]+Math.sign(n[0]-q[0])*r, by=q[1]+Math.sign(n[1]-q[1])*r;
+    d+=' L'+ax+','+ay+' Q'+q[0]+','+q[1]+' '+bx+','+by;
+  }
+  var last=pts[pts.length-1]; return d+' L'+last[0]+','+last[1];
+}
+function frameOf(s){
+  // stored frame, grown to contain its nodes (in edit mode / after moves)
+  var x0=s.x,y0=s.y,x1=s.x+s.w,y1=s.y+s.h;
+  data.nodes.forEach(function(n){ if(n.section!==s.id) return;
+    x0=Math.min(x0,n.x-16); y0=Math.min(y0,n.y-40); x1=Math.max(x1,n.x+n.w+16); y1=Math.max(y1,n.y+n.h+16); });
+  return {x:x0,y:y0,w:x1-x0,h:y1-y0};
+}
+
+function render(skipPanel){
+  var vw=data.viewBox[0], vh=data.viewBox[1], OY=data.offsetY;
+  // grow canvas if nodes go below
+  var maxY=0, maxX=0; data.nodes.forEach(function(n){maxY=Math.max(maxY,n.y+n.h); maxX=Math.max(maxX,n.x+n.w);});
+  data.sections.forEach(function(s){var f=frameOf(s); maxY=Math.max(maxY,f.y+f.h); maxX=Math.max(maxX,f.x+f.w);});
+  var legendY=Math.max(1160,maxY+24);
+  vh=Math.max(vh,legendY+OY+72); vw=Math.max(vw,maxX+32);
+  svg.setAttribute('viewBox','0 0 '+vw+' '+vh); svg.style.width=vw+'px'; svg.style.minWidth=vw+'px';
+  while(svg.childNodes.length) svg.removeChild(svg.firstChild);
+  var title=el('title',{id:'pfe-title'},svg); title.textContent=data.title;
+  var desc=el('desc',{id:'pfe-desc'},svg); desc.textContent='可編輯的社區藥局運作流程圖：處方調劑、慢箋續領、OTC 諮詢與後台作業。';
+  var defs=el('defs',{},svg);
+  var pat=el('pattern',{id:'dots',width:22,height:22,patternUnits:'userSpaceOnUse'},defs); el('circle',{cx:1,cy:1,r:0.9,fill:'rgba(45,49,66,0.10)'},pat);
+  [['arrow',C.muted],['arrow-accent',C.acc],['arrow-sel','#2e5aa8']].forEach(function(m){var mk=el('marker',{id:m[0],markerWidth:8,markerHeight:6,refX:7,refY:3,orient:'auto'},defs); el('polygon',{points:'0 0, 8 3, 0 6',fill:m[1]},mk);});
+  el('rect',{width:'100%',height:'100%',fill:C.paper},svg);
+  el('rect',{id:'bg',width:'100%',height:'100%',fill:'url(#dots)',opacity:0.55},svg);
+  txt(svg,32,40,data.title,{fill:C.ink,'font-size':30,'font-family':SERIF});
+  txt(svg,vw-32,40,data.subtitle,{fill:C.muted,'font-size':12,'font-family':SANS,'text-anchor':'end'});
+  var root=el('g',{id:'root',transform:'translate(0,'+OY+')'},svg);
+  // sections
+  data.sections.forEach(function(s){
+    var f=frameOf(s), on=isOpen(s.id);
+    var g=el('g',{'class':'zone','data-z':s.id,tabindex:0,role:'button','aria-expanded':String(on)},root);
+    el('rect',{'class':'zframe',x:f.x,y:f.y,width:f.w,height:on?f.h:36,rx:8,fill:'rgba(45,49,66,0.025)',stroke:'rgba(45,49,66,0.18)','stroke-width':1,'stroke-dasharray':'4,4'},g);
+    el('rect',{'class':'zhit',x:f.x,y:f.y,width:f.w,height:36,rx:8,fill:'transparent'},g);
+    var t=el('text',{x:s.tx+(f.x-s.x),y:f.y+23,fill:C.muted,'font-size':13,'font-weight':600,'font-family':SANS},g);
+    if(!editing){var c=el('tspan',{fill:C.acc},t); c.textContent=on?'▾ ':'▸ ';}
+    var tg=el('tspan',{'font-family':MONO,'font-size':11,'letter-spacing':'0.12em'},t); tg.textContent=s.id;
+    var tt=el('tspan',{},t); tt.textContent='  '+s.title;
+    if(!editing&&s.hint){var h=el('tspan',{fill:C.soft,'font-weight':400,'font-size':12},t); h.textContent=on?'　點擊收合':'　點擊展開';}
+    if(!editing){
+      g.addEventListener('click',function(){open[s.id]=!open[s.id]; render();});
+      g.addEventListener('keydown',function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();open[s.id]=!open[s.id];render();}});
+    }
+  });
+  // edges
+  var eg=el('g',{id:'edges'},root), lg=el('g',{id:'elabels'},root);
+  data.edges.forEach(function(e){
+    var a=nodeById(e.from), b=nodeById(e.to); if(!a||!b) return;
+    var vis=isOpen(a.section)&&isOpen(b.section);
+    var pts=route(e); var isSel=sel&&sel.kind==='edge'&&sel.id===e.id;
+    var g=el('g',{'class':'edge fade'+(vis?'':' hidden')+(isSel?' sel':''),'data-id':e.id},eg);
+    var col=e.accent?C.acc:C.muted;
+    el('path',{'class':'vis',d:rpath(pts),fill:'none',stroke:col,'stroke-width':e.accent?1.4:1.2,'stroke-dasharray':e.dashed?'5,4':null,'marker-end':'url(#'+(isSel?'arrow-sel':e.accent?'arrow-accent':'arrow')+')'},g);
+    el('path',{'class':'hit',d:rpath(pts)},g);
+    if(e.label){
+      var p=pts[0],q=pts[1],t=(e.labelT==null?0.5:e.labelT);
+      var w=Math.ceil((textW(e.label)+8)/4)*4, lx,ly,cx;
+      var lgp=el('g',{'class':'fade'+(vis?'':' hidden'),'data-edge':e.id},lg);
+      if(p[1]===q[1]){ cx=p[0]+(q[0]-p[0])*t; ly=p[1]-16; lx=cx-w/2; }
+      else { ly=p[1]+(q[1]-p[1])*t; lx=p[0]+8; cx=lx+w/2; }
+      el('rect',{x:lx,y:ly-8,width:w,height:16,rx:2,fill:C.paper},lgp);
+      txt(lgp,cx,ly+4,e.label,{fill:e.accent?C.acc:C.muted,'font-size':12,'font-weight':500,'font-family':SANS,'text-anchor':'middle'});
+      if(editing){lgp.style.cursor='pointer'; lgp.addEventListener('pointerdown',function(ev){ev.stopPropagation(); if(isDbl('e:'+e.id)){ev.preventDefault();inlineEdge(e);return;} select('edge',e.id);});}
+    }
+    if(editing){
+      g.addEventListener('pointerdown',function(ev){ev.stopPropagation(); if(isDbl('e:'+e.id)){ev.preventDefault();inlineEdge(e);return;} select('edge',e.id);});
+    }
+  });
+  // nodes
+  var ng=el('g',{id:'nodes'},root);
+  data.nodes.forEach(function(n){
+    var vis=isOpen(n.section), isSel=sel&&sel.kind==='node'&&sel.id===n.id;
+    var tri=n.role==='triage'&&!editing;
+    var g=el('g',{'class':'node fade'+(vis?'':' hidden')+(isSel?' sel':'')+(tri?' tri':''),'data-id':n.id,id:tri?'tri':null,tabindex:tri?0:null,role:tri?'button':null},ng);
+    var fill=n.safety?C.accT:'#ffffff', stroke=n.safety?C.acc:C.ink;
+    if(n.type==='decision'){
+      var cx=n.x+n.w/2, cy=n.y+n.h/2;
+      el('polygon',{'class':'shape',points:cx+','+n.y+' '+(n.x+n.w)+','+cy+' '+cx+','+(n.y+n.h)+' '+n.x+','+cy,fill:fill,stroke:stroke,'stroke-width':n.safety?1.2:1},g);
+    } else if(n.type==='startend'){
+      el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:20,fill:C.paper},g);
+      el('rect',{'class':'shape',x:n.x,y:n.y,width:n.w,height:n.h,rx:20,fill:n.safety?C.accT:'rgba(45,49,66,0.03)',stroke:n.safety?C.acc:'rgba(45,49,66,0.40)','stroke-width':1},g);
+    } else {
+      el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:6,fill:C.paper},g);
+      el('rect',{'class':'shape',x:n.x,y:n.y,width:n.w,height:n.h,rx:6,fill:fill,stroke:stroke,'stroke-width':1},g);
+    }
+    var subs=(n.sublabel||'').split('\n').filter(function(s){return s.length;});
+    var lab=n.label+(tri?(' '+((open.A&&open.B&&open.C)?'▾':'▸')):'');
+    var cxn=n.x+n.w/2, total=20+subs.length*16, top=n.y+(n.h-total)/2;
+    if(!subs.length) txt(g,cxn,n.y+n.h/2+5,lab,{fill:C.ink,'font-size':14,'font-weight':600,'font-family':SANS,'text-anchor':'middle'});
+    else {
+      var y0 = n.type==='startend'? n.y+20 : (n.h>=52? n.y+22 : top+15);
+      txt(g,cxn,y0,lab,{fill:C.ink,'font-size':14,'font-weight':600,'font-family':SANS,'text-anchor':'middle'});
+      subs.forEach(function(s,i){txt(g,cxn,y0+(n.type==='startend'?17:18)+i*16,s,{fill:C.soft,'font-size':12,'font-family':SANS,'text-anchor':'middle'});});
+    }
+    if(tri){
+      var tog=function(){var v=!(open.A&&open.B&&open.C); open.A=open.B=open.C=v; render();};
+      g.addEventListener('click',tog); g.addEventListener('keydown',function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();tog();}});
+    }
+    if(editing){
+      g.addEventListener('pointerdown',function(ev){nodeDown(ev,n);});
+      if(isSel){
+        var hx=n.x+n.w/2, hy=n.y+n.h+0;
+        var hd=el('circle',{'class':'handle',cx:hx,cy:hy,r:7,fill:'#2e5aa8',stroke:'#fff','stroke-width':2},g);
+        var h2=el('circle',{'class':'handle',cx:n.x+n.w,cy:n.y+n.h/2,r:7,fill:'#2e5aa8',stroke:'#fff','stroke-width':2},g);
+        [hd,h2].forEach(function(h){h.addEventListener('pointerdown',function(ev){ev.stopPropagation(); handleDown(ev,n);});});
+      }
+    }
+  });
+  drawLegend(root,legendY);
+  svg.setAttribute('role','img'); svg.setAttribute('aria-labelledby','pfe-title pfe-desc');
+  if(!skipPanel) renderPanel();
+}
+function drawLegend(root,LY){
+  var g=el('g',{id:'legend'},root);
+  el('line',{x1:32,y1:LY,x2:1448,y2:LY,stroke:'rgba(45,49,66,0.12)','stroke-width':0.8},g);
+  txt(g,32,LY+20,'LEGEND · 圖例',{fill:C.muted,'font-size':11,'font-family':MONO,'letter-spacing':'0.18em'});
+  var ly=LY+36, T={fill:C.muted,'font-size':12,'font-family':SANS};
+  el('rect',{x:32,y:ly,width:28,height:16,rx:8,fill:'rgba(45,49,66,0.03)',stroke:'rgba(45,49,66,0.40)'},g); txt(g,68,ly+13,'起點／終點',T);
+  el('rect',{x:200,y:ly,width:28,height:16,rx:2,fill:'#fff',stroke:C.ink},g); txt(g,236,ly+13,'作業步驟',T);
+  el('polygon',{points:'368,'+(ly+8)+' 382,'+ly+' 396,'+(ly+8)+' 382,'+(ly+16),fill:'#fff',stroke:C.ink},g); txt(g,404,ly+13,'判斷',T);
+  el('polygon',{points:'500,'+(ly+8)+' 514,'+ly+' 528,'+(ly+8)+' 514,'+(ly+16),fill:C.accT,stroke:C.acc},g); txt(g,536,ly+13,'關鍵病人安全判斷',T);
+  el('line',{x1:704,y1:ly+8,x2:736,y2:ly+8,stroke:C.muted,'stroke-width':1.2,'marker-end':'url(#arrow)'},g); txt(g,744,ly+13,'流程',T);
+  el('line',{x1:820,y1:ly+8,x2:852,y2:ly+8,stroke:C.muted,'stroke-width':1.2,'stroke-dasharray':'5,4','marker-end':'url(#arrow)'},g); txt(g,860,ly+13,'回流／資料・物品交接',T);
+  el('rect',{x:1048,y:ly,width:28,height:16,rx:4,fill:'rgba(45,49,66,0.025)',stroke:'rgba(45,49,66,0.18)','stroke-dasharray':'4,4'},g); txt(g,1084,ly+13,'作業區',T);
+}
+
+// ---------- coordinates ----------
+function svgPt(ev){var p=svg.createSVGPoint(); p.x=ev.clientX; p.y=ev.clientY; var m=$('root').getScreenCTM().inverse(); var r=p.matrixTransform(m); return [r.x,r.y];}
+function snap4(v){return Math.round(v/4)*4;}
+function nodeAt(x,y,exclude){ for(var i=data.nodes.length-1;i>=0;i--){var n=data.nodes[i]; if(n.id===exclude) continue; if(x>=n.x&&x<=n.x+n.w&&y>=n.y&&y<=n.y+n.h) return n;} return null; }
+
+// ---------- selection & dragging ----------
+function select(kind,id){ sel=id?{kind:kind,id:id}:null; render(); }
+function nodeDown(ev,n){
+  ev.stopPropagation(); if(ev.button!==0) return;
+  if(connectFrom){ if(connectFrom!==n.id) addEdge(connectFrom,n.id); connectFrom=null; document.body.classList.remove('connecting'); return; }
+  if(isDbl('n:'+n.id)){ ev.preventDefault(); inlineNode(n); return; }
+  if(!(sel&&sel.kind==='node'&&sel.id===n.id)){ sel={kind:'node',id:n.id}; }
+  var start=svgPt(ev), ox=n.x, oy=n.y, before=snap(), moved=false;
+  var gEl=null;
+  function mv(e){ var p=svgPt(e); var dx=p[0]-start[0], dy=p[1]-start[1]; if(!moved&&Math.abs(dx)+Math.abs(dy)<3) return; moved=true;
+    n.x=snap4(ox+dx); n.y=snap4(oy+dy); render(); }
+  function up(){ window.removeEventListener('pointermove',mv); window.removeEventListener('pointerup',up);
+    if(moved) commit(before); else render(); }
+  window.addEventListener('pointermove',mv); window.addEventListener('pointerup',up);
+  render();
+}
+function autoSides(a,b){
+  var dx=(b.x+b.w/2)-(a.x+a.w/2), dy=(b.y+b.h/2)-(a.y+a.h/2);
+  if(Math.abs(dy)>=Math.abs(dx)) return dy>=0?['bottom','top']:['top','bottom'];
+  return dx>=0?['right','left']:['left','right'];
+}
+function addEdge(f,t){
+  var a=nodeById(f), b=nodeById(t); if(!a||!b||f===t) return;
+  var before=snap(), s=autoSides(a,b);
+  var id=nextId('e',data.edges);
+  data.edges.push({id:id,from:f,fromSide:s[0],to:t,toSide:s[1],label:'',dashed:false,accent:false});
+  sel={kind:'edge',id:id}; commit(before); status('已新增連線 (connected) '+a.label+' → '+b.label);
+}
+function handleDown(ev,n){
+  if(ev.button!==0) return;
+  var root=$('root'); var start=sidePt(n,'bottom');
+  var line=el('path',{d:'',stroke:'#2e5aa8','stroke-width':1.6,'stroke-dasharray':'4,3',fill:'none','marker-end':'url(#arrow-sel)'},root);
+  function mv(e){var p=svgPt(e); line.setAttribute('d','M'+start[0]+','+start[1]+' L'+p[0]+','+p[1]);}
+  function up(e){window.removeEventListener('pointermove',mv); window.removeEventListener('pointerup',up);
+    var p=svgPt(e); var t=nodeAt(p[0],p[1],n.id); if(line.parentNode) line.parentNode.removeChild(line);
+    if(t) addEdge(n.id,t.id); else render(); }
+  window.addEventListener('pointermove',mv); window.addEventListener('pointerup',up);
+}
+function nextId(prefix,list){var m=0; list.forEach(function(o){var k=parseInt(String(o.id).replace(/\D/g,''),10); if(k>m)m=k;}); return prefix+(m+1);}
+function sectionAt(x,y){ for(var i=0;i<data.sections.length;i++){var f=frameOf(data.sections[i]); if(x>=f.x&&x<=f.x+f.w&&y>=f.y&&y<=f.y+f.h) return data.sections[i].id;} return 'T'; }
+function addNode(x,y){
+  var before=snap(); var w=200,h=52;
+  if(x==null){ var wrap=$('canvasWrap'); var r=svg.getBoundingClientRect(); var ev={clientX:Math.max(r.left,0)+wrap.clientWidth/2,clientY:Math.max(r.top,0)+wrap.clientHeight/2}; var p=svgPt(ev); x=p[0]; y=p[1]; }
+  var n={id:nextId('n',data.nodes),type:'process',label:'新步驟',sublabel:'',section:sectionAt(x,y),safety:false,x:snap4(x-w/2),y:snap4(y-h/2),w:w,h:h};
+  data.nodes.push(n); sel={kind:'node',id:n.id}; commit(before); status('已新增節點 (node added)');
+  return n;
+}
+function deleteSel(){
+  if(!sel) return; var before=snap();
+  if(sel.kind==='node'){ var id=sel.id; data.nodes=data.nodes.filter(function(n){return n.id!==id;}); data.edges=data.edges.filter(function(e){return e.from!==id&&e.to!==id;}); }
+  else { var eid=sel.id; data.edges=data.edges.filter(function(e){return e.id!==eid;}); }
+  sel=null; commit(before); status('已刪除 (deleted)');
+}
+
+// ---------- inline edit ----------
+function inlineBox(x,y,w,h,fields,onOk){
+  var box=$('inline'); var root=$('root'); var m=root.getScreenCTM(); var wr=$('canvasWrap').getBoundingClientRect();
+  box.innerHTML='';
+  var inputs=fields.map(function(f){var i=document.createElement(f.multi?'textarea':'input'); if(!f.multi)i.type='text'; i.value=f.value; i.placeholder=f.ph; i.setAttribute('aria-label',f.ph); box.appendChild(i); return i;});
+  var hint=document.createElement('div'); hint.className='hint'; hint.textContent='Enter 確認・Esc 取消（副標題可換行：Shift+Enter）'; box.appendChild(hint);
+  box.style.display='flex';
+  box.style.left=(m.a*x+m.e-wr.left+$('canvasWrap').scrollLeft)+'px';
+  box.style.top=(m.d*y+m.f-wr.top+$('canvasWrap').scrollTop)+'px';
+  box.style.width=Math.max(220,m.a*w)+'px';
+  inputs[0].focus(); inputs[0].select();
+  function done(ok){ box.style.display='none'; box.onkeydown=null; if(ok) onOk(inputs.map(function(i){return i.value;})); }
+  box.onkeydown=function(e){ if(e.key==='Escape'){e.preventDefault();done(false);} else if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();done(true);} e.stopPropagation(); };
+  inputs.forEach(function(i){i.addEventListener('blur',function(){setTimeout(function(){ if(box.style.display!=='none'&&!box.contains(document.activeElement)) done(true); },120);});});
+}
+function inlineNode(n){
+  sel={kind:'node',id:n.id}; render();
+  inlineBox(n.x,n.y,n.w,n.h,[{value:n.label,ph:'標題 (label)'},{value:n.sublabel||'',ph:'副標題 (sublabel)',multi:true}],function(v){
+    var before=snap(); var nn=nodeById(n.id); if(!nn) return; nn.label=v[0].trim()||nn.label; nn.sublabel=v[1].trim(); commit(before); });
+}
+function inlineEdge(e){
+  sel={kind:'edge',id:e.id}; render(); var pts=route(e); var p=pts[0];
+  inlineBox(p[0],p[1],160,30,[{value:e.label||'',ph:'連線標籤 (edge label)'}],function(v){var before=snap(); var ee=data.edges.filter(function(x){return x.id===e.id;})[0]; if(ee){ee.label=v[0].trim(); commit(before);} });
+}
+
+// ---------- panel ----------
+function renderPanel(){
+  var p=$('panel'); if(!editing){p.innerHTML='';return;}
+  var h='';
+  if(!sel){ h='<h3>屬性 (Properties)</h3><p class="help">・拖曳節點可移動，連線自動跟隨<br>・點兩下節點：直接改標題／副標題<br>・點兩下空白處：新增節點<br>・選取節點後，拖曳藍色圓點到另一節點即可連線，或按「連線」再點目標<br>・Delete 鍵刪除選取項目<br>・Ctrl+Z 復原、Ctrl+Y 重做</p>'; p.innerHTML=h; return; }
+  if(sel.kind==='node'){ var n=nodeById(sel.id); if(!n){sel=null;return renderPanel();}
+    h+='<h3>節點 (Node) <span style="color:#5a6580;font-weight:400">'+n.id+'</span></h3>';
+    h+='<label for="pLabel">標題 (label)</label><input type="text" id="pLabel">';
+    h+='<label for="pSub">副標題 (sublabel，可換行)</label><textarea id="pSub"></textarea>';
+    h+='<label for="pType">類型 (type)</label><select id="pType"><option value="process">作業步驟 (process)</option><option value="decision">判斷 (decision)</option><option value="startend">起點／終點 (start/end)</option></select>';
+    h+='<label for="pSec">所屬區塊 (section)</label><select id="pSec"><option value="T">入口（永遠顯示）</option>'+data.sections.map(function(s){return '<option value="'+s.id+'">'+s.id+' '+esc(s.title)+'</option>';}).join('')+'</select>';
+    h+='<div class="chk"><input type="checkbox" id="pSafe"><label for="pSafe" style="margin:0;color:inherit;font-size:13px">橘色：病人安全關鍵 (safety)</label></div>';
+    h+='<div class="row"><div><label for="pW">寬 W</label><input type="number" id="pW" step="4" min="40"></div><div><label for="pH">高 H</label><input type="number" id="pH" step="4" min="24"></div></div>';
+    h+='<div class="row"><div><label for="pX">X</label><input type="number" id="pX" step="4"></div><div><label for="pY">Y</label><input type="number" id="pY" step="4"></div></div>';
+    h+='<div class="actions"><button id="pConnect">連線到… (connect)</button><button id="pDel" class="danger">刪除節點 (delete)</button></div>';
+    p.innerHTML=h;
+    $('pLabel').value=n.label; $('pSub').value=n.sublabel||''; $('pType').value=n.type; $('pSec').value=n.section; $('pSafe').checked=!!n.safety;
+    $('pW').value=n.w; $('pH').value=n.h; $('pX').value=n.x; $('pY').value=n.y;
+    bindField('pLabel',function(v){n.label=v;}); bindField('pSub',function(v){n.sublabel=v;});
+    bindField('pType',function(v){n.type=v;},true); bindField('pSec',function(v){n.section=v;},true);
+    bindField('pW',function(v){n.w=Math.max(40,+v||n.w);},true); bindField('pH',function(v){n.h=Math.max(24,+v||n.h);},true);
+    bindField('pX',function(v){n.x=+v||0;},true); bindField('pY',function(v){n.y=+v||0;},true);
+    $('pSafe').addEventListener('change',function(){var b=snap(); n.safety=this.checked; commit(b);});
+    $('pConnect').onclick=startConnect; $('pDel').onclick=deleteSel;
+  } else { var e=data.edges.filter(function(x){return x.id===sel.id;})[0]; if(!e){sel=null;return renderPanel();}
+    var a=nodeById(e.from), b=nodeById(e.to);
+    h+='<h3>連線 (Edge) <span style="color:#5a6580;font-weight:400">'+e.id+'</span></h3><p class="help">'+esc(a?a.label:'?')+' → '+esc(b?b.label:'?')+'</p>';
+    h+='<label for="eLabel">標籤 (label，留空即無)</label><input type="text" id="eLabel">';
+    var sides='<option value="top">上 top</option><option value="bottom">下 bottom</option><option value="left">左 left</option><option value="right">右 right</option>';
+    h+='<div class="row"><div><label for="eFS">起點邊</label><select id="eFS">'+sides+'</select></div><div><label for="eTS">終點邊</label><select id="eTS">'+sides+'</select></div></div>';
+    h+='<label for="eT">標籤位置 (0–1)</label><input type="number" id="eT" step="0.05" min="0" max="1">';
+    h+='<div class="chk"><input type="checkbox" id="eDash"><label for="eDash" style="margin:0;color:inherit;font-size:13px">虛線（回流／交接）</label></div>';
+    h+='<div class="chk"><input type="checkbox" id="eAcc"><label for="eAcc" style="margin:0;color:inherit;font-size:13px">橘色重點線</label></div>';
+    h+='<div class="actions"><button id="eDel" class="danger">刪除連線 (delete)</button></div>';
+    p.innerHTML=h;
+    $('eLabel').value=e.label||''; $('eFS').value=e.fromSide; $('eTS').value=e.toSide; $('eT').value=(e.labelT==null?0.5:e.labelT);
+    $('eDash').checked=!!e.dashed; $('eAcc').checked=!!e.accent;
+    bindField('eLabel',function(v){e.label=v;}); bindField('eFS',function(v){e.fromSide=v;},true); bindField('eTS',function(v){e.toSide=v;},true);
+    bindField('eT',function(v){var t=parseFloat(v); e.labelT=isNaN(t)?0.5:Math.min(1,Math.max(0,t));},true);
+    $('eDash').addEventListener('change',function(){var b=snap(); e.dashed=this.checked; commit(b);});
+    $('eAcc').addEventListener('change',function(){var b=snap(); e.accent=this.checked; commit(b);});
+    $('eDel').onclick=deleteSel;
+  }
+}
+function bindField(id,setter,onChange){
+  var f=$(id), before=null;
+  f.addEventListener('focus',function(){before=snap();});
+  f.addEventListener(onChange?'change':'input',function(){ if(before===null) before=snap(); setter(f.value);
+    if(onChange){ commit(before); before=null; } else { save(); renderKeepPanel(); } });
+  if(!onChange) f.addEventListener('change',function(){ if(before!==null&&before!==snap()){undoStack.push(before); redoStack=[]; updButtons();} before=null; });
+}
+function renderKeepPanel(){ render(true); }
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function startConnect(){ if(!sel||sel.kind!=='node') return; connectFrom=sel.id; document.body.classList.add('connecting'); status('連線模式：請點選目標節點（Esc 取消）'); }
+
+// ---------- mode ----------
+function setMode(ed){ editing=ed; document.body.classList.toggle('editing',ed); $('modeBtn').textContent=ed?'切換到檢視模式 (View)':'切換到編輯模式 (Edit)'; $('modeBtn').classList.toggle('on',ed); sel=null; connectFrom=null; document.body.classList.remove('connecting'); $('inline').style.display='none'; render(); }
+
+// ---------- import/export ----------
+function download(name,blob){var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(a.href); a.remove();},1000);}
+function exportJSON(){ download('pharmacy-flowchart.json',new Blob([JSON.stringify(data,null,1)],{type:'application/json'})); status('已匯出 JSON'); }
+function validate(d){ if(!d||!Array.isArray(d.nodes)||!Array.isArray(d.edges)||!Array.isArray(d.sections)) throw new Error('格式不符：需要 nodes / edges / sections');
+  d.nodes.forEach(function(n){ if(!n.id||typeof n.x!=='number'||typeof n.y!=='number') throw new Error('節點資料不完整：'+JSON.stringify(n).slice(0,60)); if(!n.w)n.w=200; if(!n.h)n.h=52; if(!n.type)n.type='process'; if(!n.section)n.section='T'; });
+  d.edges.forEach(function(e){ if(!e.from||!e.to) throw new Error('連線資料不完整'); if(!e.fromSide||!e.toSide){e.fromSide='bottom';e.toSide='top';} if(!e.id) e.id='e'+Math.random().toString(36).slice(2,7); });
+  if(!d.viewBox) d.viewBox=[1480,1292]; if(d.offsetY==null) d.offsetY=72; if(!d.title) d.title=ORIGINAL.title; if(d.subtitle==null) d.subtitle=ORIGINAL.subtitle; return d; }
+function importJSONText(text){ var d=validate(JSON.parse(text)); var before=snap(); data=d; sel=null; commit(before); status('已匯入 JSON (imported)'); }
+function importJSON(file){ var r=new FileReader(); r.onload=function(){ try{importJSONText(r.result);}catch(e){alert('匯入失敗：'+e.message);} }; r.readAsText(file,'utf-8'); }
+function downloadHTML(){
+  var seedEl=$('seed-data'), old=seedEl.textContent;
+  seedEl.textContent=JSON.stringify({seedId:'s'+Date.now(),data:data}).replace(/</g,'\\u003c');
+  var svgOld=svg.innerHTML; svg.innerHTML=''; var inl=$('inline').innerHTML; $('inline').innerHTML=''; var pan=$('panel').innerHTML; $('panel').innerHTML='';
+  var cls=document.body.className; document.body.className='';
+  var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
+  document.body.className=cls; seedEl.textContent=old; svg.innerHTML=svgOld; $('inline').innerHTML=inl; $('panel').innerHTML=pan; render();
+  download('pharmacy-flowchart-editor-copy.html',new Blob([html],{type:'text/html'})); status('已下載含目前資料的 HTML');
+}
+function svgString(){ var wasEd=editing, s=sel; if(wasEd){editing=false;} sel=null; var o=clone(open); for(var k in open) open[k]=true; render();
+  var c=svg.cloneNode(true); c.setAttribute('xmlns',NS); c.removeAttribute('style'); var vb=svg.getAttribute('viewBox').split(' '); c.setAttribute('width',vb[2]); c.setAttribute('height',vb[3]);
+  var str=new XMLSerializer().serializeToString(c); open=o; editing=wasEd; sel=s; render(); return {str:str,w:+vb[2],h:+vb[3]}; }
+function exportSVG(){ var s=svgString(); download('pharmacy-flowchart.svg',new Blob([s.str],{type:'image/svg+xml'})); status('已匯出 SVG（全部展開）'); }
+function exportPNG(){ var s=svgString(); var img=new Image(); var url=URL.createObjectURL(new Blob([s.str],{type:'image/svg+xml'}));
+  img.onload=function(){ var cv=document.createElement('canvas'); cv.width=s.w*2; cv.height=s.h*2; var ctx=cv.getContext('2d'); ctx.scale(2,2); ctx.drawImage(img,0,0); URL.revokeObjectURL(url);
+    cv.toBlob(function(b){download('pharmacy-flowchart.png',b); status('已匯出 PNG（全部展開）');},'image/png'); };
+  img.onerror=function(){alert('PNG 匯出失敗，請改用 SVG 匯出');}; img.src=url; }
+function resetAll(){ if(!confirm('確定要還原成原始流程圖嗎？目前的修改會被清除（可用 Ctrl+Z 復原）。')) return; var before=snap(); data=clone(ORIGINAL); sel=null; commit(before); status('已還原為原始版本 (reset)'); }
+
+// ---------- wiring ----------
+$('modeBtn').onclick=function(){setMode(!editing);};
+$('expandAll').onclick=function(){for(var k in open)open[k]=true; render();};
+$('collapseAll').onclick=function(){for(var k in open)open[k]=false; render();};
+$('addBtn').onclick=function(){addNode();};
+$('connectBtn').onclick=startConnect;
+$('delBtn').onclick=deleteSel;
+$('undoBtn').onclick=undo; $('redoBtn').onclick=redo;
+$('exportJsonBtn').onclick=exportJSON;
+$('importJsonBtn').onclick=function(){$('fileIn').click();};
+$('fileIn').onchange=function(){ if(this.files[0]) importJSON(this.files[0]); this.value=''; };
+$('htmlBtn').onclick=downloadHTML; $('svgBtn').onclick=exportSVG; $('pngBtn').onclick=exportPNG; $('resetBtn').onclick=resetAll;
+svg.addEventListener('pointerdown',function(ev){ if(!editing||ev.button!==0) return;
+  if(isDbl('bg')){ ev.preventDefault(); var p=svgPt(ev); var n=addNode(p[0],p[1]); setTimeout(function(){inlineNode(nodeById(n.id));},0); return; }
+  if(connectFrom){connectFrom=null;document.body.classList.remove('connecting');status('已取消連線');} if(sel){sel=null; render();} });
+document.addEventListener('keydown',function(ev){
+  var tag=(ev.target.tagName||'').toLowerCase(); var typing=tag==='input'||tag==='textarea'||tag==='select';
+  if((ev.ctrlKey||ev.metaKey)&&!typing){ var k=ev.key.toLowerCase(); if(k==='z'&&!ev.shiftKey){ev.preventDefault();undo();} else if(k==='y'||(k==='z'&&ev.shiftKey)){ev.preventDefault();redo();} }
+  if(!editing||typing) return;
+  if(ev.key==='Delete'||ev.key==='Backspace'){ if(sel){ev.preventDefault(); deleteSel();} }
+  if(ev.key==='Escape'){ connectFrom=null; document.body.classList.remove('connecting'); sel=null; render(); }
+});
+window.__editor={get data(){return data;}, open:open, setMode:setMode, importJSONText:importJSONText, render:render};
+load(); setMode(false); updButtons();
+})();
+</script>
+</body>
+</html>
